@@ -8,6 +8,7 @@
 #define B_ADDR_LEN 32
 #define B_MEM_ALIGN_LEN 2
 #define B_HIST_MAX_SIZE 8
+#define B_FSM_SIZE 2
 
 typedef uint32_t tag_t;
 typedef uint32_t addr_t;
@@ -27,21 +28,61 @@ typedef struct {
 } BTB_entry;
 
 typedef struct {
+    BTB_entry *m_ent;
+
     uint8_t m_size;
     uint8_t m_tag_size;
     uint8_t m_history_size;
+    histbuf_t m_history;
     predictor_t m_default_stat;
-    BTB_entry *m_ent;
 
     predictor_t *m_fsm_arr;
-    histbuf_t m_history;
 
     bool is_global_table;
     bool is_global_history;
     bool share;
+
+    unsigned int m_flush_num;  // Machine flushes
+    unsigned int m_br_num;     // Number of branch instructions
+    unsigned int m_b_mem_size; // Theoretical allocated BTB and branch pred size
 } BTB;
 
 static BTB btb;
+
+short my_log2(uint8_t size);
+
+size_t calc_mem_usage() {
+    uint8_t n_entries = btb.m_size;
+    uint8_t tag_size = btb.m_tag_size;
+    uint8_t target_size = my_log2(btb.m_size);
+    uint8_t history_size = btb.m_history_size;
+    uint8_t fsm_tbl_size = B_FSM_SIZE * (2 ^ history_size);
+
+    size_t mem_size;
+    if (!btb.is_global_history && !btb.is_global_table) {
+        mem_size = n_entries         //
+                   * (tag_size       //
+                      + target_size  //
+                      + history_size //
+                      + fsm_tbl_size);
+    } else if (btb.is_global_history && !btb.is_global_table) {
+        mem_size = n_entries              //
+                       * (tag_size        //
+                          + target_size   //
+                          + fsm_tbl_size) //
+                   + history_size;
+    } else if (!btb.is_global_history && btb.is_global_table) {
+        mem_size = n_entries              //
+                       * (tag_size        //
+                          + target_size   //
+                          + history_size) //
+                   + fsm_tbl_size;
+    } else {
+        mem_size = n_entries * (tag_size + target_size) //
+                   + (history_size + fsm_tbl_size);
+    }
+    return mem_size;
+}
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
             unsigned fsmState, bool isGlobalHist, bool isGlobalTable,
@@ -53,6 +94,9 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     btb.m_default_stat = fsmState;
     btb.is_global_history = isGlobalHist;
     btb.is_global_table = isGlobalTable;
+    btb.m_flush_num = 0;
+    btb.m_br_num = 0;
+    btb.m_b_mem_size = calc_mem_usage();
 
     if (Shared && !isGlobalTable)
         return -1; // failure
@@ -90,7 +134,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     return 0; // success
 }
 
-short my_log2(short size) {
+short my_log2(uint8_t size) {
     short result = 0;
     while (size >>= 1)
         result++;
@@ -163,7 +207,12 @@ bool BP_predict(uint32_t pc, uint32_t *dst) {
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
+
     return;
 }
 
-void BP_GetStats(SIM_stats *curStats) { return; }
+void BP_GetStats(SIM_stats *curStats) {
+    curStats->flush_num = btb.m_flush_num;
+    curStats->br_num = btb.m_br_num;
+    curStats->size = btb.m_b_mem_size;
+}
