@@ -7,6 +7,7 @@
 
 #define B_ADDR_LEN 32
 #define B_MEM_ALIGN_LEN 2
+#define B_HIST_MAX_SIZE 8
 
 typedef uint32_t tag_t;
 typedef uint32_t addr_t;
@@ -112,6 +113,21 @@ tag_t get_tag(uint32_t pc) {
     return tag;
 }
 
+uint8_t get_fsm_arr_idx(const histbuf_t hist_buf) {
+    if (btb.m_history_size == B_HIST_MAX_SIZE)
+        return hist_buf; // cause hist_buf is a uint8_t anyway
+    histbuf_t idx = hist_buf << (B_HIST_MAX_SIZE - btb.m_history_size);
+    idx >>= B_HIST_MAX_SIZE - btb.m_history_size;
+    return idx;
+}
+
+void update_hist_buf(histbuf_t *hist_buf, bool taken) {
+    *hist_buf <<= 1;
+    if (!taken)
+        return;
+    *hist_buf |= 1; // 1 is a mask
+}
+
 // true for taken - false for not taken
 bool BP_predict(uint32_t pc, uint32_t *dst) {
     short ent = get_entry(pc);
@@ -121,13 +137,29 @@ bool BP_predict(uint32_t pc, uint32_t *dst) {
     if (cur_ent->m_tag != tag)
         return false;
 
-    if (!btb.is_global_history) {
-    }
+    histbuf_t *cur_hist_buf = NULL;
+    predictor_t *cur_pred_arr = NULL;
 
-    if (!btb.is_global_table) {
-    }
+    if (!btb.is_global_history)
+        cur_hist_buf = &cur_ent->m_local_history;
+    else
+        cur_hist_buf = &btb.m_history;
 
-    return true;
+    if (!btb.is_global_table)
+        cur_pred_arr = cur_ent->m_local_fsm_arr;
+    else
+        cur_pred_arr = btb.m_fsm_arr;
+
+    uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf);
+
+    switch (cur_pred_arr[arr_idx]) {
+    case ST:
+    case WT:
+        return true;
+    case WNT:
+    case SNT:
+        return false;
+    }
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
