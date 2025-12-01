@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#define B_ADDR_LEN 32
+#define B_MEM_ALIGN_LEN 2
+
 typedef uint32_t tag_t;
 typedef uint32_t addr_t;
 typedef uint8_t histbuf_t;
@@ -86,7 +89,46 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     return 0; // success
 }
 
-bool BP_predict(uint32_t pc, uint32_t *dst) { return false; }
+short my_log2(short size) {
+    short result = 0;
+    while (size >>= 1)
+        result++;
+    return result;
+}
+
+short get_entry(uint32_t pc) {
+    const int b_idx_len = my_log2(btb.m_size);
+    uint32_t ent = pc >> B_MEM_ALIGN_LEN;
+    ent <<= B_ADDR_LEN - b_idx_len;
+    ent >>= B_ADDR_LEN - b_idx_len;
+    return ent;
+}
+
+tag_t get_tag(uint32_t pc) {
+    const int b_idx_len = my_log2(btb.m_size);
+    tag_t tag = pc >> (b_idx_len + B_MEM_ALIGN_LEN);
+    tag <<= B_ADDR_LEN - btb.m_tag_size;
+    tag >>= B_ADDR_LEN - btb.m_tag_size;
+    return tag;
+}
+
+// true for taken - false for not taken
+bool BP_predict(uint32_t pc, uint32_t *dst) {
+    short ent = get_entry(pc);
+    tag_t tag = get_tag(pc);
+    BTB_entry *cur_ent = &btb.m_ent[ent];
+
+    if (cur_ent->m_tag != tag)
+        return false;
+
+    if (!btb.is_global_history) {
+    }
+
+    if (!btb.is_global_table) {
+    }
+
+    return true;
+}
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
     return;
