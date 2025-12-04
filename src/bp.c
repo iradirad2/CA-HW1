@@ -47,6 +47,7 @@ typedef struct {
     bool is_global_history;
     uint8_t share;
 
+    unsigned int m_fsm_arr_size;
     unsigned int m_flush_num;  // Machine flushes
     unsigned int m_br_num;     // Number of branch instructions
     unsigned int m_b_mem_size; // Theoretical allocated BTB and branch pred size
@@ -77,6 +78,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     btb.m_flush_num = 0;
     btb.m_br_num = 0;
     btb.m_b_mem_size = calc_mem_usage();
+    btb.m_fsm_arr_size = ttp(btb.m_history_size);
 
     if (Shared && !isGlobalTable)
         return -1; // failure
@@ -93,7 +95,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
         btb.m_history = 0;
     }
 
-    const int fsm_arr_size = ttp(btb.m_history_size);
+    const unsigned int fsm_arr_size = btb.m_fsm_arr_size;
     if (!btb.is_global_table) {
         for (int ent_idx = 0; ent_idx < btb.m_size; ent_idx++) {
             btb.m_ent[ent_idx].m_local_fsm_arr =
@@ -166,8 +168,16 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
     tag_t tag = get_tag(pc);
     BTB_entry *cur_ent = &btb.m_ent[ent];
 
-    if (cur_ent->m_tag != tag && !btb.is_global_history) {
-        cur_ent->m_local_history = 0;
+    if (cur_ent->m_tag != tag) {
+        if (!btb.is_global_history) {
+            cur_ent->m_local_history = 0;
+        }
+        if (!btb.is_global_table) {
+            predictor_t *fsm_arr = cur_ent->m_local_fsm_arr;
+            for (int i = 0; i < btb.m_fsm_arr_size; i++) {
+                fsm_arr[i] = btb.m_default_stat;
+            }
+        }
     }
     cur_ent->m_tag = tag;
     cur_ent->m_target_addr = targetPc;
@@ -188,6 +198,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
     uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, *cur_ent);
 
     if (cur_ent->m_last_check != taken) {
+        btb.m_flush_num++;
+    } else if (taken && (cur_ent->m_target_addr != pred_dst)) {
         btb.m_flush_num++;
     }
     btb.m_br_num++;

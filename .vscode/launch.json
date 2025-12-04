@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/src/bp_main",
             "args": [
-                "${workspaceFolder}/build/src/CompArchHw1Tests/test103.trc"
+                "${workspaceFolder}/build/src/CompArchHw1Tests/test14.trc"
             ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
