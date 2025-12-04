@@ -59,7 +59,7 @@ short my_log2(uint8_t size);
 size_t calc_mem_usage();
 short get_entry(uint32_t pc);
 tag_t get_tag(uint32_t pc);
-uint8_t get_fsm_arr_idx(const histbuf_t hist_buf, const BTB_entry entery);
+uint8_t get_fsm_arr_idx(const histbuf_t hist_buf, addr_t pc);
 void update_hist_buf(histbuf_t *hist_buf, bool taken);
 uint8_t get_history(const histbuf_t hist_buf);
 uint8_t align_for_history(const uint32_t addr);
@@ -81,9 +81,9 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     btb.m_fsm_arr_size = ttp(btb.m_history_size);
 
     if (Shared && !isGlobalTable)
-        return -1; // failure
-
-    btb.share = Shared;
+        btb.share = 0;
+    else
+        btb.share = Shared;
 
     btb.m_ent = (BTB_entry *)malloc(sizeof(BTB_entry) * btb.m_size);
 
@@ -145,7 +145,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst) {
     else
         cur_pred_arr = btb.m_fsm_arr;
 
-    uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, *cur_ent);
+    uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, pc);
 
     switch (cur_pred_arr[arr_idx]) {
     case ST:
@@ -195,7 +195,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
         cur_pred_arr = cur_ent->m_local_fsm_arr;
     else
         cur_pred_arr = btb.m_fsm_arr;
-    uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, *cur_ent);
+    uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, pc);
 
     if (cur_ent->m_last_check != taken) {
         btb.m_flush_num++;
@@ -246,6 +246,9 @@ short get_entry(uint32_t pc) {
 }
 
 tag_t get_tag(uint32_t pc) {
+    if (btb.m_tag_size == 0)
+        return 0;
+
     const int b_idx_len = my_log2(btb.m_size);
     tag_t tag = pc >> (b_idx_len + B_MEM_ALIGN_LEN);
     tag <<= B_ADDR_LEN - btb.m_tag_size;
@@ -268,14 +271,12 @@ uint8_t align_for_history(const uint32_t addr) {
     return aligned;
 }
 
-uint8_t get_fsm_arr_idx(const histbuf_t hist_buf, const BTB_entry entery) {
+uint8_t get_fsm_arr_idx(const histbuf_t hist_buf, addr_t pc) {
     uint8_t arr_idx;
     if (btb.share == 1) {
-        arr_idx = get_history(hist_buf) ^
-                  align_for_history(entery.IP_addr >> SHARE_LSB);
+        arr_idx = get_history(hist_buf) ^ align_for_history(pc >> SHARE_LSB);
     } else if (btb.share == 2) {
-        arr_idx = get_history(hist_buf) ^
-                  align_for_history(entery.IP_addr >> SHARE_MID);
+        arr_idx = get_history(hist_buf) ^ align_for_history(pc >> SHARE_MID);
     } else {
         arr_idx = get_history(hist_buf);
     }
