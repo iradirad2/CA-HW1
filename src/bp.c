@@ -19,29 +19,31 @@ typedef uint8_t histbuf_t;
 
 typedef enum { MIN_BOUND, SNT, WNT, WT, ST, MAX_BOUND } predictor_t;
 
+// struct for each entry
 typedef struct {
     tag_t m_tag;
     addr_t IP_addr;
     addr_t m_target_addr;
-    predictor_t *m_local_fsm_arr;
+    predictor_t *m_local_fsm_arr; // local fsm array
 
-    histbuf_t m_local_history;
+    histbuf_t m_local_history; // local history buffer
 
     bool m_last_check;
     bool m_used;
     bool m_valid;
 } BTB_entry;
 
+// struct for the btb
 typedef struct {
-    BTB_entry *m_ent;
+    BTB_entry *m_ent; // array of entries
 
-    uint8_t m_size;
+    uint8_t m_size; // size of btb
     uint8_t m_tag_size;
     uint8_t m_history_size;
-    histbuf_t m_history;
-    predictor_t m_default_stat;
+    histbuf_t m_history;        // global history buffer
+    predictor_t m_default_stat; // default fsm state
 
-    predictor_t *m_fsm_arr;
+    predictor_t *m_fsm_arr; // global fsm array
 
     bool is_global_table;
     bool is_global_history;
@@ -53,8 +55,9 @@ typedef struct {
     unsigned int m_b_mem_size; // Theoretical allocated BTB and branch pred size
 } BTB;
 
-static BTB btb;
+static BTB btb; // global static instance of the btb
 
+// helper function prototypes
 short my_log2(uint8_t size);
 size_t calc_mem_usage();
 short get_entry(uint32_t pc);
@@ -69,6 +72,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
             unsigned fsmState, bool isGlobalHist, bool isGlobalTable,
             int Shared) {
 
+    // initialize all structure fields
     btb.m_size = btbSize;
     btb.m_history_size = historySize;
     btb.m_tag_size = tagSize;
@@ -80,14 +84,18 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     btb.m_b_mem_size = calc_mem_usage();
     btb.m_fsm_arr_size = ttp(btb.m_history_size);
 
+    // if shared and not global then make shared 0, cause it doesn't make sense
+    // otherwise
     if (Shared && !isGlobalTable) {
         btb.share = 0;
     } else {
         btb.share = Shared;
     }
 
+    // create entries
     btb.m_ent = (BTB_entry *)malloc(sizeof(BTB_entry) * btb.m_size);
 
+    // create global or local history
     if (!btb.is_global_history) {
         for (int ent_idx = 0; ent_idx < btb.m_size; ent_idx++) {
             btb.m_ent[ent_idx].m_local_history = 0;
@@ -96,6 +104,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
         btb.m_history = 0;
     }
 
+    // allocate global or local fsm table
     const unsigned int fsm_arr_size = btb.m_fsm_arr_size;
     if (!btb.is_global_table) {
         for (int ent_idx = 0; ent_idx < btb.m_size; ent_idx++) {
@@ -114,6 +123,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
         }
     }
 
+    // initialize valid bits to 0
     for (int ent_idx = 0; ent_idx < btb.m_size; ent_idx++) {
         btb.m_ent[ent_idx].m_valid = false;
     }
@@ -127,6 +137,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst) {
     tag_t tag = get_tag(pc);
     BTB_entry *cur_ent = &btb.m_ent[ent];
 
+    // if the entry doesn't exist, return false and set dest to pc+4
     if (cur_ent->m_valid == false || cur_ent->m_tag != tag) {
         cur_ent->m_last_check = false;
         *dst = pc + 4;
@@ -136,6 +147,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst) {
     histbuf_t *cur_hist_buf = NULL;
     predictor_t *cur_pred_arr = NULL;
 
+    // choose if we work with global or local history
     if (!btb.is_global_history)
         cur_hist_buf = &cur_ent->m_local_history;
     else
@@ -146,8 +158,10 @@ bool BP_predict(uint32_t pc, uint32_t *dst) {
     else
         cur_pred_arr = btb.m_fsm_arr;
 
+    // find the index inside the fsm table with the history
     uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, pc);
 
+    // reutrn the prediction according to the fsm table
     switch (cur_pred_arr[arr_idx]) {
     case ST:
     case WT:
@@ -169,6 +183,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
     tag_t tag = get_tag(pc);
     BTB_entry *cur_ent = &btb.m_ent[ent];
 
+    // if the entry doesn't have the same tag, then reset the history and the
+    // fsm array, if they are not global
     if (cur_ent->m_tag != tag) {
         if (!btb.is_global_history) {
             cur_ent->m_local_history = 0;
@@ -188,6 +204,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
     histbuf_t *cur_hist_buf = NULL;
     predictor_t *cur_pred_arr = NULL;
 
+    // choose what to work with
     if (!btb.is_global_history)
         cur_hist_buf = &cur_ent->m_local_history;
     else
@@ -196,16 +213,24 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
         cur_pred_arr = cur_ent->m_local_fsm_arr;
     else
         cur_pred_arr = btb.m_fsm_arr;
+
+    // get the index
     uint8_t arr_idx = get_fsm_arr_idx(*cur_hist_buf, pc);
 
+    // if the predition was wrong, then flush
     if (cur_ent->m_last_check != taken) {
         btb.m_flush_num++;
+        // if the prediction was right, and was taken, but the target and
+        // destination are not the same, then flush (can be caused because of
+        // aliasing)
     } else if (taken && (cur_ent->m_target_addr != pred_dst)) {
         btb.m_flush_num++;
     }
     btb.m_br_num++;
 
     update_hist_buf(cur_hist_buf, taken);
+
+    // keep the next state of the fsm in bounds
     predictor_t next_state;
     if (taken == true) {
         next_state = (predictor_t)((int)cur_pred_arr[arr_idx] + 1);
@@ -226,7 +251,6 @@ void BP_GetStats(SIM_stats *curStats) {
     curStats->size = btb.m_b_mem_size;
 
     // release memory
-
     const unsigned int fsm_arr_size = btb.m_fsm_arr_size;
     if (!btb.is_global_table) {
         for (int ent_idx = 0; ent_idx < btb.m_size; ent_idx++) {
@@ -241,6 +265,7 @@ void BP_GetStats(SIM_stats *curStats) {
 
 // -------------------- helper functions --------------------
 
+// simple log function
 short my_log2(uint8_t size) {
     short result = 0;
     while (size >>= 1)
@@ -248,12 +273,14 @@ short my_log2(uint8_t size) {
     return result;
 }
 
+// return 2^exponent
 short ttp(uint8_t exponent) { return (1 << exponent); }
 
 short get_entry(uint32_t pc) {
     const int b_idx_len = my_log2(btb.m_size);
     if (b_idx_len == 0)
         return 0;
+    // get the entry bits, with masking the other bits
     uint32_t ent = pc >> B_MEM_ALIGN_LEN;
     ent <<= B_ADDR_LEN - b_idx_len;
     ent >>= B_ADDR_LEN - b_idx_len;
@@ -265,6 +292,7 @@ tag_t get_tag(uint32_t pc) {
         return 0;
 
     const int b_idx_len = my_log2(btb.m_size);
+    // get the tag bits with masking the other bits
     tag_t tag = pc >> (b_idx_len + B_MEM_ALIGN_LEN);
     tag <<= B_ADDR_LEN - btb.m_tag_size;
     tag >>= B_ADDR_LEN - btb.m_tag_size;
@@ -275,12 +303,16 @@ uint8_t get_history(const histbuf_t hist_buf) {
     if (btb.m_history_size == B_HIST_MAX_SIZE)
         return hist_buf; // cause hist_buf is a uint8_t anyway
 
+    // return the relevant bits of the history buffer with masking the other
+    // bits
     histbuf_t history = hist_buf << (B_HIST_MAX_SIZE - btb.m_history_size);
     history >>= B_HIST_MAX_SIZE - btb.m_history_size;
     return history;
 }
 
 uint8_t align_for_history(const uint32_t addr) {
+    // get the relevant bits from the address to do a xor with the history
+    // buffer
     uint8_t aligned = addr << (B_HIST_MAX_SIZE - btb.m_history_size);
     aligned >>= B_HIST_MAX_SIZE - btb.m_history_size;
     return aligned;
@@ -299,6 +331,7 @@ uint8_t get_fsm_arr_idx(const histbuf_t hist_buf, addr_t pc) {
 }
 
 void update_hist_buf(histbuf_t *hist_buf, bool taken) {
+    // add the last outcome to the history
     *hist_buf <<= 1;
     if (!taken)
         return;
