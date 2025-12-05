@@ -80,10 +80,11 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize,
     btb.m_b_mem_size = calc_mem_usage();
     btb.m_fsm_arr_size = ttp(btb.m_history_size);
 
-    if (Shared && !isGlobalTable)
+    if (Shared && !isGlobalTable) {
         btb.share = 0;
-    else
+    } else {
         btb.share = Shared;
+    }
 
     btb.m_ent = (BTB_entry *)malloc(sizeof(BTB_entry) * btb.m_size);
 
@@ -219,9 +220,23 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst) {
 }
 
 void BP_GetStats(SIM_stats *curStats) {
+    // pass all statistics to the main function
     curStats->flush_num = btb.m_flush_num;
     curStats->br_num = btb.m_br_num;
     curStats->size = btb.m_b_mem_size;
+
+    // release memory
+
+    const unsigned int fsm_arr_size = btb.m_fsm_arr_size;
+    if (!btb.is_global_table) {
+        for (int ent_idx = 0; ent_idx < btb.m_size; ent_idx++) {
+            free(btb.m_ent[ent_idx].m_local_fsm_arr);
+        }
+    } else {
+        free(btb.m_fsm_arr);
+    }
+
+    free(btb.m_ent);
 }
 
 // -------------------- helper functions --------------------
