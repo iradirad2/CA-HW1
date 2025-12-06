@@ -1,0 +1,12 @@
+#!/bin/bash
+for filename in tests/small_btb_example*.trc; do
+    test_num=$(echo "$filename" | cut -d'.' -f1)
+    dos2unix "$filename"
+    ./bp_main "$filename" > "${test_num}Yours.out"
+    echo "Comparing $test_num.out"
+    diff "${test_num}.out" "${test_num}Yours.out"
+    if [ $? -ne 0 ]; then
+        echo "Difference found! Stopping script."
+        break 
+    fi
+done
